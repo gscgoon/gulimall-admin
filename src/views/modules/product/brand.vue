@@ -114,7 +114,7 @@ export default {
       //解构data数据，只需要向后台发送品牌id，显示状态showStatus
       let { brandId, showStatus } = data;
       this.$http({
-        url: this.$http.adornUrl("/product/brand/update"),
+        url: this.$http.adornUrl("/product/brand/update/status"),
         method: "post",
         data: this.$http.adornData(
           { brandId: brandId, showStatus: showStatus },
