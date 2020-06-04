@@ -1,5 +1,8 @@
 <template>
   <div>
+    <el-switch v-model="draggable" active-text="开启拖拽" inactive-text="关闭拖拽"></el-switch>
+    <el-button v-if="draggable" @click="batchSave">批量保存</el-button>
+    <el-button type="danger" @click="batchDel">批量删除</el-button>
     <el-tree
       :data="menuData"
       :props="defaultProps"
@@ -7,9 +10,10 @@
       node-key="catId"
       :expand-on-click-node="false"
       :default-expanded-keys="expandedKey"
-      draggable
+      :draggable="draggable"
       :allow-drop="allowDrop"
       @node-drop="handleDrop"
+      ref="menuTree"
     >
       <span class="custom-tree-node" slot-scope="{ node, data }">
         <span>{{ node.label }}</span>
@@ -74,6 +78,8 @@ export default {
         productUnit: "",
         catId: null
       },
+      pCid: [], //定义全局父节点数组，展开对应修改过的层级结构
+      draggable: false, //默认不可拖拽
       updateNodes: [], //所有要更新的节点的集合
       maxLevel: 0, //定义最大的等级数,也就是子节点的等级数
       title: "", //弹框提示信息
@@ -112,6 +118,52 @@ export default {
       if (this.dialogType == "edit") {
         this.editCategory(); //修改三级分类
       }
+    },
+    ////批量删除选中的节点
+    batchDel() {
+      let delNodes = []; //选中节点的集合
+      let childrenNodes = this.$refs.menuTree.getCheckedNodes();
+      // console.log("选中的节点", childrenNodes);
+      for (let i = 0; i < childrenNodes.length; i++) {
+        delNodes.push(childrenNodes[i].catId);
+      }
+      this.$confirm(`确定批量删除【${delNodes}】菜单？`, "提示", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning"
+      })
+        .then(() => {
+          this.$http({
+            url: this.$http.adornUrl("/product/category/delete"),
+            method: "post",
+            data: this.$http.adornData(delNodes, false)
+          }).then(({ data }) => {
+            this.$message({
+              message: "菜单批量删除成功",
+              type: "success"
+            });
+            this.getTreeMenu(); //重新加载
+          });
+        })
+        .catch(() => {});
+    },
+    //批量保存修改的节点内容
+    batchSave() {
+      //将收集到的要更新的节点向后台发送请求
+      this.$http({
+        url: this.$http.adornUrl("/product/category/update/sort"),
+        method: "post",
+        data: this.$http.adornData(this.updateNodes, false)
+      }).then(({ data }) => {
+        this.$message({
+          message: "菜单拖拽顺序修改成功",
+          type: "success"
+        });
+        this.getTreeMenu(); //重新加载
+        this.expandedKey = this.pCid; //展开拖拽目标节点的三级分类的父节点
+        this.updateNodes = []; //每次拖拽时，所有要更新的节点的集合需要置空
+        this.maxLevel = 0;
+      });
     },
     //新增分类
     append(data) {
@@ -212,7 +264,7 @@ export default {
     },
     //拖拽成功完成时触发的事件
     handleDrop(draggingNode, dropNode, dropType, ev) {
-      console.log("事件: ", draggingNode, dropNode, dropType);
+      // console.log("事件: ", draggingNode, dropNode, dropType);
       //1.当前节点的最新父节点
       let pCid = 0;
       let allChildrenNodes = null; //目标节点的所有子节点
@@ -227,7 +279,8 @@ export default {
         pCid = dropNode.data.catId;
         allChildrenNodes = dropNode.childNodes;
       }
-      console.log("最新父节点：", pCid);
+      this.pCid.push(pCid);
+      // console.log("最新父节点：", pCid);
 
       //2.当前节点的最新顺序
       for (let i = 0; i < allChildrenNodes.length; i++) {
@@ -253,22 +306,7 @@ export default {
           });
         }
       }
-      console.log("更新节点的集合：", this.updateNodes);
-      //将收集到的要更新的节点向后台发送请求
-      this.$http({
-        url: this.$http.adornUrl("/product/category/update/sort"),
-        method: "post",
-        data: this.$http.adornData(this.updateNodes, false)
-      }).then(({ data }) => {
-        this.$message({
-          message: "菜单拖拽顺序修改成功",
-          type: "success"
-        });
-        this.getTreeMenu(); //重新加载
-        this.expandedKey = [pCid]; //展开拖拽目标节点的三级分类的父节点
-        this.updateNodes = [], //每次拖拽时，所有要更新的节点的集合需要置空
-        this.maxLevel = 0;
-      });
+      // console.log("更新节点的集合：", this.updateNodes);
     },
     //3.当前节点的最新层次
     updateChildrenNodeLevel(node) {
@@ -288,12 +326,12 @@ export default {
       //1、当前拖拽节点的总层数和所在父节点的总层数的和不能大于3，只有三个等级的分类
 
       //当前节点的总层数（循环递归）
-      console.log("thisNode:", draggingNode, dropNode, type);
-      this.thisNodeLevel(draggingNode.data);
+      // console.log("thisNode:", draggingNode, dropNode, type);
+      this.thisNodeLevel(draggingNode);
 
       //当前拖动的节点+所在父节点的和<=3就可以拖动
-      var deep = this.maxLevel - draggingNode.data.catLevel + 1;
-      console.log("深度：", deep);
+      var deep = Math.abs(this.maxLevel - draggingNode.level) + 1;
+      // console.log("深度：", deep);
       //判断type的类型，进行拖拽的效果
       if (type == "inner") {
         return deep + dropNode.level <= 3;
@@ -303,15 +341,15 @@ export default {
     },
     thisNodeLevel(node) {
       //找到所有子节点，统计节点深度
-      if (node.children != null && node.children.length > 0) {
+      if (node.childNodes != null && node.childNodes.length > 0) {
         //循环遍历
-        for (let i = 0; i < node.children.length; i++) {
+        for (let i = 0; i < node.childNodes.length; i++) {
           //找出比定义的最大等级数大的等级数
-          if (node.children[i].catLevel > this.maxLevel) {
-            this.maxLevel = node.children[i].catLevel;
+          if (node.childNodes[i].level > this.maxLevel) {
+            this.maxLevel = node.childNodes[i].level;
           }
           //如果有子节点继续找出最大的节点数
-          this.thisNodeLevel(node.children[i]);
+          this.thisNodeLevel(node.childNodes[i]);
         }
       }
     }
